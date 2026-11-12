@@ -157,6 +157,7 @@ class MusigSigner {
           theirNonce,
           rawTransaction,
           index,
+          current.lockupAddress,
         );
       },
     );
@@ -356,6 +357,7 @@ class MusigSigner {
               toSign.theirNonce,
               toSign.rawTransaction,
               toSign.index,
+              swap.lockupAddress,
             );
           },
         );

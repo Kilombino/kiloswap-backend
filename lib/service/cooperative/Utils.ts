@@ -1,14 +1,18 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { Transaction } from '@scure/btc-signer';
+import type { Transaction as ScureTransaction } from '@scure/btc-signer';
 import type { Types } from 'boltz-core';
 import {
   createMusig,
   hashForWitnessV1,
+  maxSigningInputs,
   parseTransaction,
+  spentScript,
   tweakMusig,
 } from '../../Core';
 import { TxView } from '../../TxView';
 import { getHexString } from '../../Utils';
+import { CurrencyType } from '../../consts/Enums';
 import type Wallet from '../../wallet/Wallet';
 import type { Currency } from '../../wallet/WalletManager';
 import Errors from '../Errors';
@@ -30,10 +34,25 @@ export const createPartialSignature = async (
   theirNonce: Buffer,
   rawTransaction: Buffer | string,
   vin: number,
+  // The swap's lockup address: the input signed must spend an output to
+  // it, not anything a caller puts in its place
+  lockupAddress: string,
 ): Promise<PartialSignature> => {
   const tx = parseTransaction(currency.type, rawTransaction);
-  if (vin < 0 || TxView.of(tx).inputs.length <= vin) {
+  if (!Number.isInteger(vin) || vin < 0 || TxView.of(tx).inputs.length <= vin) {
     throw Errors.INVALID_VIN();
+  }
+  if (currency.type === CurrencyType.BitcoinLike) {
+    if (TxView.of(tx).inputs.length > maxSigningInputs) {
+      throw Errors.INVALID_VIN();
+    }
+    const spent = await spentScript(currency, tx as ScureTransaction, vin);
+    if (
+      spent === undefined ||
+      !Buffer.from(spent).equals(wallet.decodeAddress(lockupAddress))
+    ) {
+      throw Errors.INVALID_VIN();
+    }
   }
 
   const ourKeys = wallet.getKeysByIndex(keyIndex);

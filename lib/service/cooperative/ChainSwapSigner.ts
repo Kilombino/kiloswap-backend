@@ -141,6 +141,7 @@ class ChainSwapSigner extends CoopSignerBase<{ claim: ChainSwapInfo }> {
         theirNonce,
         transaction,
         index,
+        swap.receivingData.lockupAddress,
       );
 
       await ChainSwapRepository.setRefundSignatureCreated(swap.id);
@@ -397,6 +398,7 @@ class ChainSwapSigner extends CoopSignerBase<{ claim: ChainSwapInfo }> {
       toSign.pubNonce,
       toSign.transaction,
       toSign.index,
+      data.lockupAddress,
     );
   };
 

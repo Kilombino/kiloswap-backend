@@ -4,7 +4,12 @@ import { Transaction as ScureTransaction } from '@scure/btc-signer';
 import type { Types } from 'boltz-core';
 import { Musig, TaprootUtils, swapTree } from 'boltz-core';
 import { randomBytes } from 'crypto';
-import { hashForWitnessV1, setup } from '../../../../lib/Core';
+import {
+  hashForWitnessV1,
+  maxSigningInputs,
+  setup,
+  spentScript,
+} from '../../../../lib/Core';
 import { getHexBuffer, getHexString } from '../../../../lib/Utils';
 import { CurrencyType } from '../../../../lib/consts/Enums';
 import Errors from '../../../../lib/service/Errors';
@@ -98,18 +103,49 @@ describe('Utils', () => {
       .message(hash)
       .generateNonce();
 
+    // The "lockup": what the transaction's input really spends
+    const spent = Buffer.from(
+      (await spentScript(
+        btcCurrency,
+        ScureTransaction.fromRaw(hexToBytes(tx)),
+        0,
+      ))!,
+    );
+    const wallet = {
+      getKeysByIndex: jest.fn().mockReturnValue(boltzKeys),
+      decodeAddress: jest.fn().mockReturnValue(spent),
+    } as unknown as Wallet;
+
     const partialSignature = await createPartialSignature(
       btcCurrency,
-      {
-        getKeysByIndex: jest.fn().mockReturnValue(boltzKeys),
-      } as unknown as Wallet,
+      wallet,
       tree,
       0,
       clientKeys.publicKey,
       Buffer.from(clientMusig.publicNonce),
       tx,
       0,
+      'lockup',
     );
+    expect(wallet.decodeAddress).toHaveBeenCalledWith('lockup');
+
+    // An input that spends anything but the lockup is not signed
+    await expect(
+      createPartialSignature(
+        btcCurrency,
+        {
+          getKeysByIndex: jest.fn().mockReturnValue(boltzKeys),
+          decodeAddress: jest.fn().mockReturnValue(Buffer.from('0014', 'hex')),
+        } as unknown as Wallet,
+        tree,
+        0,
+        clientKeys.publicKey,
+        Buffer.from(clientMusig.publicNonce),
+        tx,
+        0,
+        'lockup',
+      ),
+    ).rejects.toEqual(Errors.INVALID_VIN());
 
     const session = clientMusig
       .aggregateNonces([[boltzKeys.publicKey, partialSignature.pubNonce]])
@@ -149,10 +185,48 @@ describe('Utils', () => {
           Buffer.alloc(0),
           tx,
           vin,
+          'lockup',
         ),
       ).rejects.toEqual(Errors.INVALID_VIN());
     },
   );
+
+  test('should not sign for a transaction with too many inputs', async () => {
+    const one = ScureTransaction.fromRaw(
+      hexToBytes(
+        await bitcoinClient.getRawTransaction(
+          await bitcoinClient.sendToAddress(
+            await bitcoinClient.getNewAddress(''),
+            100_000,
+            undefined,
+            false,
+            '',
+          ),
+        ),
+      ),
+      { allowUnknownOutputs: true },
+    );
+    const many = new ScureTransaction({ allowUnknownOutputs: true });
+    const input = one.getInput(0);
+    for (let i = 0; i <= maxSigningInputs; i++) {
+      many.addInput({ txid: input.txid!, index: i });
+    }
+    many.addOutput({ script: one.getOutput(0).script!, amount: 1000n });
+
+    await expect(
+      createPartialSignature(
+        { type: CurrencyType.BitcoinLike } as Currency,
+        {} as Wallet,
+        {} as Types.SwapTree,
+        1,
+        Buffer.alloc(0),
+        Buffer.alloc(0),
+        Buffer.from(many.toBytes(true, false)),
+        0,
+        'lockup',
+      ),
+    ).rejects.toEqual(Errors.INVALID_VIN());
+  });
 
   describe('checkArkTransaction', () => {
     test('should throw when checkpoint has more than one input', () => {

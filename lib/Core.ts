@@ -412,22 +412,64 @@ export const tweakMusig = <T extends Musig.MusigKeyAgg>(
     swapTree.tree,
   ) as T;
 
+// The most inputs a transaction we sign for may have: each needs its
+// previous transaction read and parsed, so an unbounded number (a 64 kB
+// request holds hundreds) would exhaust the process's memory
+export const maxSigningInputs = 32;
+
 const collectBitcoinInputs = async (
   currency: Currency,
   tx: ScureTransaction,
-): Promise<{ script: Uint8Array; amount: bigint }[]> =>
-  Promise.all(
-    TxView.of(tx).inputs.map(async (input) => {
-      const prevHex = await currency.chainClient!.getRawTransaction(input.txid);
-      const prevTx = ScureTransaction.fromRaw(hexToBytes(prevHex), {
-        allowUnknownOutputs: true,
-        allowUnknownInputs: true,
-        allowLegacyWitnessUtxo: true,
-      });
-      const prevOut = prevTx.getOutput(input.index);
+): Promise<{ script: Uint8Array; amount: bigint }[]> => {
+  const inputs = TxView.of(tx).inputs;
+  if (inputs.length > maxSigningInputs) {
+    throw new Error(
+      `transaction has ${inputs.length} inputs, more than ${maxSigningInputs}`,
+    );
+  }
+  // Each previous transaction once, however many inputs spend it
+  const previous = new Map<string, Promise<ScureTransaction>>();
+  const load = (txid: string) => {
+    let pending = previous.get(txid);
+    if (pending === undefined) {
+      pending = currency.chainClient!.getRawTransaction(txid).then((prevHex) =>
+        ScureTransaction.fromRaw(hexToBytes(prevHex), {
+          allowUnknownOutputs: true,
+          allowUnknownInputs: true,
+          allowLegacyWitnessUtxo: true,
+        }),
+      );
+      previous.set(txid, pending);
+    }
+    return pending;
+  };
+  return Promise.all(
+    inputs.map(async (input) => {
+      const prevOut = (await load(input.txid)).getOutput(input.index);
       return { script: prevOut.script!, amount: prevOut.amount! };
     }),
   );
+};
+
+// The output script an input of a Bitcoin transaction spends
+export const spentScript = async (
+  currency: Currency,
+  tx: ScureTransaction,
+  vin: number,
+): Promise<Uint8Array | undefined> => {
+  const input = TxView.of(tx).inputs[vin];
+  const prevTx = ScureTransaction.fromRaw(
+    hexToBytes(await currency.chainClient!.getRawTransaction(input.txid)),
+    {
+      allowUnknownOutputs: true,
+      allowUnknownInputs: true,
+      allowLegacyWitnessUtxo: true,
+    },
+  );
+  return prevTx.outputsLength > input.index
+    ? prevTx.getOutput(input.index).script
+    : undefined;
+};
 
 const collectLiquidInputs = async (
   currency: Currency,

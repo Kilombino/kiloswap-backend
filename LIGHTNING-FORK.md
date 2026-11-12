@@ -160,6 +160,22 @@ Found by a review of the submarine and reverse swap paths.
     route's pattern and its error, never its body (a swap's invoice, the
     user's keys and addresses, the rescue xpub) nor its query; the same in
     the sidecar (`c43469a8`).
+15. **From a review of the code against a hostile user** (2026-11-12):
+    - a cooperative refund or claim to co-sign takes at most 32 inputs,
+      each previous transaction fetched once, and the input signed must
+      spend the swap's lockup address; before, one request could fetch any
+      number of transactions while holding the swap's lock (`ef12c47e`);
+    - after lnd reconnects, the hold invoices still waited on are
+      subscribed to again; a reverse swap paid while lnd restarted was
+      never seen, and the payer's HTLC stayed held until it expired
+      (`d5ab441c`);
+    - a lockup deep enough is handed on again after 30 minutes, so a
+      transient error no longer strands the swap until a restart
+      (`b4a5b4ec`);
+    - a refund that was sent but not recorded is sent again and recorded,
+      rather than replaced by a new one every block (`6cc082fa`);
+    - a refund that lost the race to the user's claim is marked failed
+      instead of being reported late every block (`3eb5c6a0`).
 
 ## Configuration this fork expects
 
@@ -211,11 +227,12 @@ docker build -f docker/boltz/Dockerfile --build-arg NODE_VERSION=24-bookworm-sli
 ```
 
 - The Rust tests link against `libpq`. `PQ_LIB_DIR` can point at a copy.
-- The full TypeScript unit suite (120 suites, 2,743 tests) passes on
-  `31f55232`, with tsc and eslint clean.
+- The full TypeScript unit suite (122 suites, 2,764 tests) passes on
+  `3eb5c6a0`, with tsc and eslint clean.
 - The Rust tests for the changed modules pass.
-- The full Rust suite needs Postgres and the regtest services, and has not
-  been run on this fork.
+- The integration tests and the full Rust suite run in CI against Boltz's
+  regtest on the BLAKE2b chain (`regtest-blake2b/`, its README says how to
+  run it locally); the tests that need Ark are skipped.
 - End-to-end swaps on a regtest BLAKE2b chain live in the deployment
   repository (`e2e/`).
 

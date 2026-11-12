@@ -112,7 +112,11 @@ class UtxoNursery extends TypedEventEmitter<{
   private requiredLockupConfirmations = new Map<string, number>();
   // Swaps whose deep enough lockup has been handed on, so that a block
   // arriving before their status changes does not hand them on twice.
-  private deepLockupsEmitted = new Set<string>();
+  // When each deep lockup was handed on: one whose swap is still
+  // TransactionConfirmed after deepLockupRetryMs is handed on again (the
+  // handler failed: a database error, a full lock queue)
+  private deepLockupsEmitted = new Map<string, number>();
+  private static readonly deepLockupRetryMs = 30 * 60 * 1000;
 
   constructor(
     private readonly logger: Logger,
@@ -729,7 +733,7 @@ class UtxoNursery extends TypedEventEmitter<{
 
     // Forget the swaps that have moved on
     const waitingIds = new Set(waiting.map((swap) => swap.id));
-    for (const id of this.deepLockupsEmitted) {
+    for (const id of this.deepLockupsEmitted.keys()) {
       if (!waitingIds.has(id)) {
         this.deepLockupsEmitted.delete(id);
       }
@@ -741,9 +745,15 @@ class UtxoNursery extends TypedEventEmitter<{
         getChainCurrency(base, quote, swap.orderSide, false) !==
           chainClient.symbol ||
         !swap.lockupTransactionId ||
-        this.deepLockupsEmitted.has(swap.id)
+        Date.now() - (this.deepLockupsEmitted.get(swap.id) ?? 0) <
+          UtxoNursery.deepLockupRetryMs
       ) {
         continue;
+      }
+      if (this.deepLockupsEmitted.has(swap.id)) {
+        this.logger.warn(
+          `Swap ${swap.id} is still waiting for its payment after its lockup was handed on; handing it on again`,
+        );
       }
 
       try {
@@ -757,7 +767,7 @@ class UtxoNursery extends TypedEventEmitter<{
         this.logger.info(
           `Lockup ${swap.lockupTransactionId} of Swap ${swap.id} has ${tx.confirmations} confirmations`,
         );
-        this.deepLockupsEmitted.add(swap.id);
+        this.deepLockupsEmitted.set(swap.id, Date.now());
         const transaction = parseTransaction(wallet.type, tx.hex);
 
         // The status says the lockup passed its checks, but the failure of
@@ -1044,7 +1054,7 @@ class UtxoNursery extends TypedEventEmitter<{
           );
           return;
         }
-        this.deepLockupsEmitted.add(swap.id);
+        this.deepLockupsEmitted.set(swap.id, Date.now());
       }
     }
 

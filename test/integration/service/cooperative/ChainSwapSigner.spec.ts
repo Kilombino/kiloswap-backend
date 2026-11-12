@@ -178,11 +178,12 @@ describe('ChainSwapSigner', () => {
       const tweakedKey = Buffer.from(musig.aggPubkey);
 
       const lockupScript = Buffer.from(Scripts.p2trOutput(tweakedKey));
+      const lockupAddress = wallet.encodeAddress(lockupScript);
       const lockupTx = parseTransaction<T>(
         currency.type,
         await currency.chainClient!.getRawTransaction(
           await currency.chainClient!.sendToAddress(
-            wallet.encodeAddress(lockupScript),
+            lockupAddress,
             100_000,
             undefined,
             false,
@@ -200,6 +201,7 @@ describe('ChainSwapSigner', () => {
         lockupTx,
         theirKeys,
         swapOutput,
+        lockupAddress,
         timeoutBlockHeight,
         blindingPrivateKey:
           currency.type === CurrencyType.Liquid
@@ -232,6 +234,7 @@ describe('ChainSwapSigner', () => {
         receivingData: {
           symbol: 'BTC',
           keyIndex: lockupDetails.keyIndex,
+          lockupAddress: lockupDetails.lockupAddress,
           transactionVout: lockupDetails.swapOutput.vout,
           lockupTransactionId: lockupDetails.lockupTx.id,
           timeoutBlockHeight: lockupDetails.timeoutBlockHeight,
@@ -245,6 +248,7 @@ describe('ChainSwapSigner', () => {
         sendingData: {
           symbol: 'L-BTC',
           keyIndex: claimDetails.keyIndex,
+          lockupAddress: claimDetails.lockupAddress,
           transactionVout: claimDetails.swapOutput.vout,
           lockupTransactionId: claimDetails.lockupTx.getId(),
           timeoutBlockHeight: claimDetails.timeoutBlockHeight,

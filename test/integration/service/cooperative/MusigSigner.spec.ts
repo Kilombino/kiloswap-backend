@@ -84,7 +84,16 @@ describe('MusigSigner', () => {
     arkNode: {},
   } as unknown as Currency;
 
-  const btcWallet = {} as Wallet;
+  // The signers check that the input to sign spends the swap's lockup
+  // address
+  const btcWallet = {
+    decodeAddress: (address: string) =>
+      outputScriptFromAddress(
+        CurrencyType.BitcoinLike,
+        address,
+        bitcoinRegtest,
+      ),
+  } as unknown as Wallet;
   const walletManager = {
     wallets: new Map<string, Wallet>([['BTC', btcWallet]]),
   } as WalletManager;
@@ -257,6 +266,11 @@ describe('MusigSigner', () => {
       pair: 'BTC/BTC',
       version: SwapVersion.Taproot,
       status: SwapUpdateEvent.InvoiceFailedToPay,
+      lockupAddress: addressFromOutputScript(
+        CurrencyType.BitcoinLike,
+        swapOutputScript,
+        bitcoinRegtest,
+      ),
       refundPublicKey: getHexString(Buffer.from(refundKeys.publicKey)),
       preimageHash: getHexString(Buffer.from(sha256(preimage))),
       invoice: (await bitcoinLndClient2.addInvoice(123)).paymentRequest,
@@ -531,6 +545,11 @@ describe('MusigSigner', () => {
         pair: 'BTC/BTC',
         version: SwapVersion.Taproot,
         status: SwapUpdateEvent.TransactionConfirmed,
+        lockupAddress: addressFromOutputScript(
+          CurrencyType.BitcoinLike,
+          swapOutputScript,
+          bitcoinRegtest,
+        ),
         claimPublicKey: getHexString(Buffer.from(claimKeys.publicKey)),
         preimageHash: getHexString(Buffer.from(sha256(preimage))),
         redeemScript: JSON.stringify(

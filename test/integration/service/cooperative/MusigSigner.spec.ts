@@ -526,7 +526,7 @@ describe('MusigSigner', () => {
         false,
       );
 
-      ReverseSwapRepository.getReverseSwap = jest.fn().mockResolvedValue({
+      const reverseSwap = {
         keyIndex: 42,
         pair: 'BTC/BTC',
         version: SwapVersion.Taproot,
@@ -536,7 +536,17 @@ describe('MusigSigner', () => {
         redeemScript: JSON.stringify(
           SwapTreeSerializer.serializeSwapTree(tree),
         ),
-      });
+      };
+      ReverseSwapRepository.getReverseSwap = jest
+        .fn()
+        .mockImplementation(async () => ({ ...reverseSwap }));
+      // The signer reads the swap again after settling and signs only once
+      // its invoice is settled (0fcd488c)
+      nursery.settleReverseSwapInvoice = jest
+        .fn()
+        .mockImplementation(async () => {
+          reverseSwap.status = SwapUpdateEvent.InvoiceSettled;
+        });
       WrappedSwapRepository.setPreimage = jest.fn();
 
       btcWallet.getKeysByIndex = jest.fn().mockReturnValue(refundKeys);
@@ -558,7 +568,10 @@ describe('MusigSigner', () => {
 
       expect(nursery.settleReverseSwapInvoice).toHaveBeenCalledTimes(1);
       expect(nursery.settleReverseSwapInvoice).toHaveBeenCalledWith(
-        await ReverseSwapRepository.getReverseSwap({}),
+        expect.objectContaining({
+          keyIndex: 42,
+          status: SwapUpdateEvent.TransactionConfirmed,
+        }),
         preimage,
       );
       expect(WrappedSwapRepository.setPreimage).toHaveBeenCalledWith(

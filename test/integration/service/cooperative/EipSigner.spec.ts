@@ -11,6 +11,7 @@ import {
 import { RefundStatus } from '../../../../lib/db/models/RefundTransaction';
 import ChainSwapRepository from '../../../../lib/db/repositories/ChainSwapRepository';
 import CommitmentRepository from '../../../../lib/db/repositories/CommitmentRepository';
+import LightningPaymentRepository from '../../../../lib/db/repositories/LightningPaymentRepository';
 import RefundTransactionRepository from '../../../../lib/db/repositories/RefundTransactionRepository';
 import SwapRepository from '../../../../lib/db/repositories/SwapRepository';
 import { Signer } from '../../../../lib/proto/boltzrpc';
@@ -148,6 +149,10 @@ describe('EipSigner', () => {
     SwapRepository.setRefundSignatureCreated = jest.fn();
     ChainSwapRepository.getChainSwap = jest.fn().mockResolvedValue(null);
     ChainSwapRepository.setRefundSignatureCreated = jest.fn();
+    // A refund is refused when a payment for the swap is recorded as made
+    LightningPaymentRepository.findByPreimageHash = jest
+      .fn()
+      .mockResolvedValue([]);
     CommitmentRepository.getBySwapId = jest.fn().mockResolvedValue(null);
     CommitmentRepository.getByLockupHash = jest.fn().mockResolvedValue(null);
     CommitmentRepository.markRefunded = jest.fn().mockResolvedValue(undefined);

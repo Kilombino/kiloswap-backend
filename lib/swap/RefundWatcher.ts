@@ -1,9 +1,14 @@
 import InstrumentedLock from '../InstrumentedLock';
 import type Logger from '../Logger';
 import { formatError } from '../Utils';
-import { CurrencyType, swapTypeToPrettyString } from '../consts/Enums';
+import {
+  CurrencyType,
+  SwapUpdateEvent,
+  swapTypeToPrettyString,
+} from '../consts/Enums';
 import TypedEventEmitter from '../consts/TypedEventEmitter';
 import type RefundTransaction from '../db/models/RefundTransaction';
+import { RefundStatus } from '../db/models/RefundTransaction';
 import type ReverseSwap from '../db/models/ReverseSwap';
 import type { ChainSwapInfo } from '../db/repositories/ChainSwapRepository';
 import RefundTransactionRepository from '../db/repositories/RefundTransactionRepository';
@@ -132,6 +137,19 @@ class RefundWatcher extends TypedEventEmitter<{
       confirmations =
         (await chainClient.getRawTransactionVerbose(tx.id)).confirmations ?? 0;
     } catch (error) {
+      // The user's claim beat the refund (the swap is settled since): the
+      // refund will never confirm, and is not sent again or reported late
+      // every block from now on
+      if (RefundWatcher.claimedByUser(swap)) {
+        await RefundTransactionRepository.setStatus(
+          swap.id,
+          RefundStatus.Failed,
+        );
+        this.logger.info(
+          `Refund ${tx.id} of ${swapTypeToPrettyString(swap.type)} Swap ${swap.id} lost to the user's claim`,
+        );
+        return -1;
+      }
       await this.sendAgain(currency, tx, swap, error);
       confirmations = 0;
     }
@@ -151,6 +169,11 @@ class RefundWatcher extends TypedEventEmitter<{
 
     return confirmations;
   };
+
+  private static claimedByUser = (swap: ReverseSwap | ChainSwapInfo) =>
+    'sendingData' in swap
+      ? swap.status === SwapUpdateEvent.TransactionClaimed
+      : swap.status === SwapUpdateEvent.InvoiceSettled;
 
   private sendAgain = async (
     currency: Currency,

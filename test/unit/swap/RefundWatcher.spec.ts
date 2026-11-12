@@ -1,7 +1,12 @@
 import EventEmitter from 'events';
 import Logger from '../../../lib/Logger';
-import { CurrencyType, SwapType } from '../../../lib/consts/Enums';
+import {
+  CurrencyType,
+  SwapType,
+  SwapUpdateEvent,
+} from '../../../lib/consts/Enums';
 import type RefundTransaction from '../../../lib/db/models/RefundTransaction';
+import { RefundStatus } from '../../../lib/db/models/RefundTransaction';
 import type ReverseSwap from '../../../lib/db/models/ReverseSwap';
 import RefundTransactionRepository from '../../../lib/db/repositories/RefundTransactionRepository';
 import type Sidecar from '../../../lib/sidecar/Sidecar';
@@ -80,6 +85,26 @@ describe('RefundWatcher (UTXO refunds)', () => {
 
     expect(chainClient.getWalletTransaction).toHaveBeenCalledWith('refund');
     expect(chainClient.sendRawTransaction).toHaveBeenCalledWith('refundhex');
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  test("should give up a refund that lost to the user's claim", async () => {
+    RefundTransactionRepository.setStatus = jest.fn();
+    chainClient.getRawTransactionVerbose.mockRejectedValue(
+      new Error('No such mempool or blockchain transaction'),
+    );
+    chainClient.getBlockchainInfo.mockResolvedValue({ blocks: 2000 });
+
+    await watcher.checkTransaction(tx, {
+      ...swap,
+      status: SwapUpdateEvent.InvoiceSettled,
+    } as unknown as ReverseSwap);
+
+    expect(RefundTransactionRepository.setStatus).toHaveBeenCalledWith(
+      'rev',
+      RefundStatus.Failed,
+    );
+    expect(chainClient.sendRawTransaction).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();
   });
 

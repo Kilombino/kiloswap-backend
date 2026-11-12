@@ -7,6 +7,7 @@ import {
   formatError,
   fromProtoInt,
   getHexBuffer,
+  getHexString,
   splitChannelPoint,
   toOptionalProtoInt,
   toProtoInt,
@@ -72,6 +73,11 @@ class LndClient extends BaseClient<EventTypes> implements LightningClient {
 
   private peerEventSubscription?: ClientReadableStream<lndrpc.PeerEvent>;
   private channelEventSubscription?: ClientReadableStream<lndrpc.ChannelEventUpdate>;
+
+  // Hold invoices waited on (preimage hashes), until accepted, settled or
+  // cancelled, and the stream of each: subscribed again on a reconnection
+  private readonly watchedInvoices = new Set<string>();
+  private readonly invoiceStreams = new Map<string, () => void>();
 
   public id: string;
 
@@ -192,6 +198,14 @@ class LndClient extends BaseClient<EventTypes> implements LightningClient {
 
       this.subscribePeerEvents();
       this.subscribeChannelEvents();
+
+      // The invoices still waited on: their streams ended with lnd's
+      // restart, and a payment held meanwhile would never be seen (no
+      // lockup, the payer's HTLC held until it expires). lnd tells each
+      // stream the invoice's state at once.
+      for (const preimageHash of this.watchedInvoices) {
+        this.subscribeSingleInvoice(Buffer.from(preimageHash, 'hex'));
+      }
 
       this.setClientStatus(ClientStatus.Connected);
       this.emit('subscription.reconnected', null);
@@ -838,6 +852,10 @@ class LndClient extends BaseClient<EventTypes> implements LightningClient {
    * Subscribe to events for a single invoice
    */
   public subscribeSingleInvoice = (preimageHash: Buffer): void => {
+    const watched = getHexString(preimageHash);
+    this.invoiceStreams.get(watched)?.();
+    this.watchedInvoices.add(watched);
+
     const request: invoicesrpc.SubscribeSingleInvoiceRequest = {
       ...invoicesrpc.SubscribeSingleInvoiceRequest.create(),
       rHash: Buffer.from(preimageHash),
@@ -851,7 +869,16 @@ class LndClient extends BaseClient<EventTypes> implements LightningClient {
     const deleteSubscription = () => {
       invoiceSubscription.removeAllListeners();
       invoiceSubscription.destroy();
+      if (this.invoiceStreams.get(watched) === deleteSubscription) {
+        this.invoiceStreams.delete(watched);
+      }
     };
+    // Done with the invoice: not subscribed again on a reconnection
+    const finished = () => {
+      this.watchedInvoices.delete(watched);
+      deleteSubscription();
+    };
+    this.invoiceStreams.set(watched, deleteSubscription);
 
     invoiceSubscription
       .on('data', (invoice: lndrpc.Invoice) => {
@@ -868,16 +895,20 @@ class LndClient extends BaseClient<EventTypes> implements LightningClient {
 
           this.emit('htlc.accepted', invoice.paymentRequest);
 
-          deleteSubscription();
+          finished();
         } else if (invoice.state === lndrpc.Invoice_InvoiceState.SETTLED) {
           this.logger.debug(
             `${this.formatNodeLabel()} invoice settled: ${invoice.paymentRequest}`,
           );
           this.emit('invoice.settled', invoice.paymentRequest);
 
-          deleteSubscription();
+          finished();
+        } else if (invoice.state === lndrpc.Invoice_InvoiceState.CANCELED) {
+          finished();
         }
       })
+      // Ended or errored without an outcome (lnd restarting): still
+      // watched, subscribed again on the reconnection
       .on('end', () => deleteSubscription())
       .on('error', (error) => {
         this.logger.error(

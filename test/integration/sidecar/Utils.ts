@@ -6,9 +6,29 @@ import Database from '../../../lib/db/Database';
 import KeyRepository from '../../../lib/db/repositories/KeyRepository';
 import Sidecar from '../../../lib/sidecar/Sidecar';
 
+// The sidecar's configuration; with BOLTZ_TEST_DB_PORT (a host whose own
+// Postgres holds 5432) a copy with that port
+const sidecarConfigPath = (): string => {
+  const original = path.join(__dirname, 'config.toml');
+  const port = process.env.BOLTZ_TEST_DB_PORT;
+  if (port === undefined) {
+    return original;
+  }
+  // Beside the original: the sidecar reads some paths relative to it
+  const copy = path.join(__dirname, `config.port-${Number(port)}.toml`);
+  fs.writeFileSync(
+    copy,
+    fs
+      .readFileSync(original, 'utf-8')
+      .replace(/^port = 5432$/m, `port = ${Number(port)}`),
+  );
+  return copy;
+};
+
 export const startSidecar = async () => {
+  const configPath = sidecarConfigPath();
   const config = toml.parse(
-    fs.readFileSync(path.join(__dirname, 'config.toml'), {
+    fs.readFileSync(configPath, {
       encoding: 'utf-8',
     }),
   );
@@ -32,7 +52,7 @@ export const startSidecar = async () => {
     loglevel: 'error',
     sidecar: {
       path: './target/debug/boltzr',
-      config: path.join(__dirname, 'config.toml'),
+      config: configPath,
     },
   } as any);
 };

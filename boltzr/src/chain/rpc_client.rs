@@ -334,8 +334,14 @@ mod test {
     #[tokio::test]
     async fn test_request_wallet() {
         let client = RpcClient::new("BTC".to_string(), get_config()).unwrap();
+        // A type, as the service always asks: the node's default differs
+        // (Bitcoin Knots, on the BLAKE2b regtest: legacy)
         let res = client
-            .request_wallet::<String>(None, "getnewaddress", None)
+            .request_wallet::<String>(
+                None,
+                "getnewaddress",
+                Some(&[RpcParam::Str(""), RpcParam::Str("bech32")]),
+            )
             .await
             .unwrap();
         assert!(res.starts_with("bcrt1"));

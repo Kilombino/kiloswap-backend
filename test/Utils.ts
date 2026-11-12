@@ -27,7 +27,8 @@ const makeRandomKeys = () => {
 export const getPostgresDatabase = () => {
   return new Database(Logger.disabledLogger, undefined, {
     host: 'localhost',
-    port: 5432,
+    // Another port where a host's own Postgres holds 5432
+    port: Number(process.env.BOLTZ_TEST_DB_PORT ?? 5432),
     database: 'boltz_test',
     username: 'boltz',
     password: 'boltz',

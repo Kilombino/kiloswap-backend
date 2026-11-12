@@ -105,3 +105,6 @@ boltz.local.conf
 
 # Local development
 .boltz-local/
+
+# The sidecar test config with another Postgres port (test/integration/sidecar/Utils.ts)
+test/integration/sidecar/config.port-*.toml

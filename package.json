@@ -28,6 +28,7 @@
     "prettier:write": "npm run prettier -- --write",
     "prettier:check": "npm run prettier -- --check",
     "regtest:start:ci": "sh -c 'cd \"$1\" && COMPOSE_PROFILES=backend-dev ./start.sh' -- \"${BOLTZ_REGTEST:-regtest}\" && npm run regtest:db:setup && npm run regtest:solidity:deploy",
+    "regtest:start:ci:blake2b": "regtest-blake2b/start.sh && npm run regtest:db:setup && npm run regtest:solidity:deploy",
     "regtest:start": "npm run regtest:start:ci && npm run regtest:solidity:fund && npm run docker:nginx",
     "regtest:stop": "sh -c 'cd \"$1\" && COMPOSE_PROFILES=backend-dev ./stop.sh' -- \"${BOLTZ_REGTEST:-regtest}\" && npm run docker:nginx:stop",
     "regtest:db:setup": "docker exec boltz-postgres sh -c \"sleep 5 && psql -U boltz -tc \\\"SELECT 1 FROM pg_database WHERE datname = 'boltz_test'\\\" | grep -q 1 || psql -U boltz -c \\\"CREATE DATABASE boltz_test\\\"\"",

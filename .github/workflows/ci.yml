@@ -5,11 +5,16 @@ on: [push, pull_request]
 jobs:
   build:
     timeout-minutes: 60
+    env:
+      # No Ark on the BLAKE2b regtest: its tests are skipped
+      BOLTZ_REGTEST_ARK: 'off'
     strategy:
       matrix:
         platform: [ubuntu-latest]
         node-version: [24]
-        rust-version: [stable]
+        # The toolchain the image is built with (docker/boltz/Dockerfile):
+        # a newer stable brings lints on code we do not write
+        rust-version: ['1.98.1']
 
     runs-on: ${{ matrix.platform }}
 
@@ -26,10 +31,13 @@ jobs:
           rust-version: ${{ matrix.rust-version }}
           cache-prefix: npm-rust-build
 
+      # Boltz's regtest on the BLAKE2b chain (regtest-blake2b/): Knots,
+      # Lightning Fork and privkeyio's Core Lightning, without what cannot
+      # read BLAKE2b blocks (electrs, Esplora, the Ark stack)
       - name: Start regtest
         id: start_regtest
-        timeout-minutes: 10
-        run: npm run regtest:start:ci && sudo chmod -R 777 regtest
+        timeout-minutes: 20
+        run: npm run regtest:start:ci:blake2b && sudo chmod -R 777 regtest
 
       - name: Docker Logs
         if: failure() && steps.start_regtest.outcome == 'failure'
@@ -37,6 +45,7 @@ jobs:
           docker image ls -a
           docker ps -a
           cd regtest
+          export COMPOSE_FILE=docker-compose.yml:../regtest-blake2b/docker-compose.blake2b.yml
           docker compose ps
           docker compose logs
 
@@ -60,13 +69,18 @@ jobs:
 
   build-rust:
     timeout-minutes: 60
+    env:
+      # No Ark on the BLAKE2b regtest: its tests are skipped
+      BOLTZ_REGTEST_ARK: 'off'
     permissions:
       contents: read
     strategy:
       matrix:
         platform: [ubuntu-latest]
         node-version: [24]
-        rust-version: [stable]
+        # The toolchain the image is built with (docker/boltz/Dockerfile):
+        # a newer stable brings lints on code we do not write
+        rust-version: ['1.98.1']
 
     runs-on: ${{ matrix.platform }}
 
@@ -89,10 +103,13 @@ jobs:
       - name: Install clippy
         run: rustup component add clippy
 
+      # Boltz's regtest on the BLAKE2b chain (regtest-blake2b/): Knots,
+      # Lightning Fork and privkeyio's Core Lightning, without what cannot
+      # read BLAKE2b blocks (electrs, Esplora, the Ark stack)
       - name: Start regtest
         id: start_regtest
-        timeout-minutes: 10
-        run: npm run regtest:start:ci && sudo chmod -R 777 regtest
+        timeout-minutes: 20
+        run: npm run regtest:start:ci:blake2b && sudo chmod -R 777 regtest
 
       - name: Docker Logs
         if: failure() && steps.start_regtest.outcome == 'failure'
@@ -100,6 +117,7 @@ jobs:
           docker image ls -a
           docker ps -a
           cd regtest
+          export COMPOSE_FILE=docker-compose.yml:../regtest-blake2b/docker-compose.blake2b.yml
           docker compose ps
           docker compose logs
 
@@ -113,7 +131,8 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Tests
-        run: cargo test
+        # The Ark modules need fulmine, which the BLAKE2b regtest does not run
+        run: cargo test -- --skip 'ark::'
         env:
           MEMPOOL_API_URL: ${{ vars.MEMPOOL_API_URL }}
 
@@ -123,7 +142,9 @@ jobs:
       matrix:
         platform: [ubuntu-latest]
         node-version: [24]
-        rust-version: [stable]
+        # The toolchain the image is built with (docker/boltz/Dockerfile):
+        # a newer stable brings lints on code we do not write
+        rust-version: ['1.98.1']
 
     runs-on: ${{ matrix.platform }}
 

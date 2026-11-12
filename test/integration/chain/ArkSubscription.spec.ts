@@ -5,12 +5,12 @@ import type {
 import TransactionLabelRepository from '../../../lib/db/repositories/TransactionLabelRepository';
 import type * as notificationrpc from '../../../lib/proto/ark/notification';
 import { waitForFunctionToBeTrue } from '../../Utils';
-import { arkClient, bitcoinClient } from '../Nodes';
+import { arkClient, arkEnabled, bitcoinClient } from '../Nodes';
 import { createVHtlc } from './Utils';
 
 TransactionLabelRepository.addLabel = jest.fn();
 
-describe('ArkSubscription', () => {
+(arkEnabled ? describe : describe.skip)('ArkSubscription', () => {
   beforeAll(async () => {
     await arkClient.connect(bitcoinClient);
   });

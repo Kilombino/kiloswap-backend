@@ -1,0 +1,259 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 752c9c5..abeb34f 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1353,8 +1353,6 @@ dependencies = [
+ [[package]]
+ name = "lightning-types"
+ version = "0.2.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f2cd84d4e71472035903e43caded8ecc123066ce466329ccd5ae537a8d5488c7"
+ dependencies = [
+  "bitcoin 0.32.7",
+ ]
+@@ -2195,7 +2193,7 @@ version = "0.29.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
+ dependencies = [
+- "bitcoin_hashes 0.14.0",
++ "bitcoin_hashes 0.13.0",
+  "rand 0.8.5",
+  "secp256k1-sys 0.10.1",
+ ]
+diff --git a/Cargo.toml b/Cargo.toml
+index 4e68686..bb75f3c 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -77,3 +77,11 @@ tonic-prost-build = "0.14.2"
+ 
+ [dev-dependencies]
+ mockall = "0.14.0"
++
++# lightning-types with `option_blake2b` (512/513) as a known feature, as the
++# Bitcoin BLAKE2b network's nodes set it in every invoice: without it the
++# invoices this plugin makes there, and the ones it is paid with, fail to
++# decode (InvalidFeatures). The crate as published, with
++# lightning-types-blake2b.patch applied, in vendor/lightning-types.
++[patch.crates-io]
++lightning-types = { path = "vendor/lightning-types" }
+diff --git a/src/encoder.rs b/src/encoder.rs
+index 7b5262e..0f464b9 100644
+--- a/src/encoder.rs
++++ b/src/encoder.rs
+@@ -1,8 +1,11 @@
+ use anyhow::Result;
+ use bitcoin::hashes::{Hash, sha256};
+ use cln_rpc::ClnRpc;
+-use cln_rpc::model::requests::SigninvoiceRequest;
+-use lightning_invoice::{Currency, PaymentSecret, RouteHint};
++use cln_rpc::model::requests::{GetinfoRequest, SigninvoiceRequest};
++use lightning::types::features::Bolt11InvoiceFeatures;
++use lightning_invoice::{
++    Currency, PaymentSecret, RawBolt11Invoice, RawTaggedField, RouteHint, TaggedField,
++};
+ use secp256k1::rand::Rng;
+ use secp256k1::{Secp256k1, SecretKey, rand};
+ use std::error::Error;
+@@ -100,14 +103,27 @@ pub struct Encoder {
+     network: Currency,
+     secret_key: SecretKey,
+     rpc: Arc<Mutex<ClnRpc>>,
++    // The features the node requires in its own invoices (little endian),
++    // which a hold invoice carries too: a node on a network with a required
++    // feature of its own (option_blake2b, 512, on the BLAKE2b network)
++    // would otherwise issue invoices that network's nodes refuse
++    required_features: Vec<u8>,
+ }
+ 
+ impl Encoder {
+     pub async fn new(rpc_file: &str, network: &str) -> Result<Self> {
++        let mut rpc = ClnRpc::new(rpc_file).await?;
++        let info = rpc.call_typed(&GetinfoRequest {}).await?;
++        let required_features = match info.our_features {
++            Some(features) => required_bits(&hex::decode(features.invoice)?),
++            None => Vec::new(),
++        };
++
+         Ok(Encoder {
+             network: Self::parse_network(network)?,
+             secret_key: SecretKey::new(&mut rand::thread_rng()),
+-            rpc: Arc::new(Mutex::new(ClnRpc::new(rpc_file).await?)),
++            rpc: Arc::new(Mutex::new(rpc)),
++            required_features,
+         })
+     }
+ 
+@@ -192,6 +208,142 @@ impl InvoiceEncoder for Encoder {
+         let invoice = builder
+             .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &self.secret_key))?;
+ 
+-        self.sign_invoice_rpc(invoice.to_string()).await
++        if self.required_features.is_empty() {
++            return self.sign_invoice_rpc(invoice.to_string()).await;
++        }
++
++        // Signed here only to be encoded; the node signs it again
++        let raw = with_features(
++            invoice.into_signed_raw().raw_invoice().clone(),
++            &self.required_features,
++        );
++        let signed = raw.sign::<_, secp256k1::Error>(|hash| {
++            Ok(Secp256k1::new().sign_ecdsa_recoverable(hash, &self.secret_key))
++        })?;
++
++        self.sign_invoice_rpc(signed.to_string()).await
++    }
++}
++
++/// The required (even) bits of big endian feature flags, as little endian
++/// flags
++fn required_bits(be_flags: &[u8]) -> Vec<u8> {
++    let mut le: Vec<u8> = be_flags.iter().rev().map(|byte| byte & 0x55).collect();
++    while le.last() == Some(&0) {
++        le.pop();
++    }
++    le
++}
++
++/// The invoice with `extra` (little endian flags) set in its features
++fn with_features(mut raw: RawBolt11Invoice, extra: &[u8]) -> RawBolt11Invoice {
++    let merge = |features: &Bolt11InvoiceFeatures| {
++        let mut flags = features.le_flags().to_vec();
++        if flags.len() < extra.len() {
++            flags.resize(extra.len(), 0);
++        }
++        for (flag, bits) in flags.iter_mut().zip(extra) {
++            *flag |= bits;
++        }
++        Bolt11InvoiceFeatures::from_le_bytes(flags)
++    };
++
++    let fields = &mut raw.data.tagged_fields;
++    match fields.iter_mut().find_map(|field| match field {
++        RawTaggedField::KnownSemantics(TaggedField::Features(features)) => Some(features),
++        _ => None,
++    }) {
++        Some(features) => *features = merge(features),
++        None => fields.push(RawTaggedField::KnownSemantics(TaggedField::Features(
++            merge(&Bolt11InvoiceFeatures::empty()),
++        ))),
++    }
++    raw
++}
++
++#[cfg(test)]
++mod test {
++    use super::*;
++    use lightning_invoice::{InvoiceBuilder, SignedRawBolt11Invoice};
++    use std::str::FromStr;
++
++    // The invoice features of privkeyio's BLAKE2b Core Lightning
++    // (v26.06.10-blake2b.1): 8, 14, 17, 25, 49 and 512
++    const BLAKE2B_NODE: &str = "0100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000002024100";
++    // Stock Core Lightning's: no bit beyond what the plugin sets
++    const STOCK_NODE: &str = "02000002024100";
++
++    fn invoice() -> RawBolt11Invoice {
++        let key = SecretKey::from_slice(&[7; 32]).unwrap();
++        InvoiceBuilder::new(Currency::Regtest)
++            .description("".into())
++            .payment_hash(sha256::Hash::hash(&[1]))
++            .payment_secret(PaymentSecret([2; 32]))
++            .basic_mpp()
++            .current_timestamp()
++            .min_final_cltv_expiry_delta(80)
++            .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &key))
++            .unwrap()
++            .into_signed_raw()
++            .raw_invoice()
++            .clone()
++    }
++
++    fn features_of(raw: &RawBolt11Invoice) -> Bolt11InvoiceFeatures {
++        let key = SecretKey::from_slice(&[7; 32]).unwrap();
++        let signed = raw
++            .clone()
++            .sign::<_, ()>(|hash| Ok(Secp256k1::new().sign_ecdsa_recoverable(hash, &key)))
++            .unwrap();
++        // Raw: rust-lightning's semantic checks refuse an invoice that
++        // requires a feature it does not know, as 512 is to it
++        SignedRawBolt11Invoice::from_str(&signed.to_string())
++            .unwrap()
++            .raw_invoice()
++            .known_tagged_fields()
++            .find_map(|field| match field {
++                TaggedField::Features(features) => Some(features.clone()),
++                _ => None,
++            })
++            .unwrap()
++    }
++
++    #[test]
++    fn test_required_bits() {
++        let required = required_bits(&hex::decode(BLAKE2B_NODE).unwrap());
++        let features = Bolt11InvoiceFeatures::from_le_bytes(required);
++        assert!(features.supports_payment_secret());
++        // Known: lightning-types-blake2b.patch
++        assert!(features.supports_blake2b());
++        assert!(!features.requires_unknown_bits());
++        // 512 and the even bits the plugin sets anyway; no optional bit
++        assert_eq!(features.le_flags().len(), 65);
++        assert_eq!(features.le_flags()[64], 0x01);
++        assert_eq!(features.le_flags()[3], 0);
++        assert_eq!(features.le_flags()[6], 0);
++    }
++
++    #[test]
++    fn test_with_features_adds_option_blake2b() {
++        let raw = with_features(
++            invoice(),
++            &required_bits(&hex::decode(BLAKE2B_NODE).unwrap()),
++        );
++        let features = features_of(&raw);
++        assert_eq!(features.le_flags()[64] & 0x01, 0x01);
++        // What the plugin set stays
++        assert!(features.supports_basic_mpp());
++        assert!(features.supports_payment_secret());
++        assert!(features.supports_variable_length_onion());
++    }
++
++    #[test]
++    fn test_with_features_changes_nothing_on_stock_nodes() {
++        let original = invoice();
++        let raw = with_features(
++            original.clone(),
++            &required_bits(&hex::decode(STOCK_NODE).unwrap()),
++        );
++        assert_eq!(features_of(&raw), features_of(&original));
+     }
+ }
+diff --git a/src/invoice/mod.rs b/src/invoice/mod.rs
+index 02c61f7..ae81af6 100644
+--- a/src/invoice/mod.rs
++++ b/src/invoice/mod.rs
+@@ -126,6 +126,25 @@ mod test {
+ 
+     use super::*;
+ 
++    // An invoice of the Bitcoin BLAKE2b network: option_blake2b (512) required
++    const BOLT11_INVOICE_BLAKE2B: &str = "lnbcrt210n1p4d7qjqpp5sm5c77n0ql0w8pumdxd993jqywmhxup2hnr02achefpkjx7cw8dssp5nry6mlde97fwtejcf73z4na8d4gyzkcgvyu2m05mnnnaqjm9pxrqdqqxqyz5vqcqzzs9r8yqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqysgqhz5gg4zt3mzpvk7lfkg4kyv326zxt2y23gxe72azv9qmv3cjnrp8gak23wkj74edjulgylcajcy6j5tz4saue65x7h245lh44huzwhsphku6gt";
++
++    #[test]
++    fn test_decode_blake2b_invoice() {
++        let invoice = Invoice::from_str(BOLT11_INVOICE_BLAKE2B).unwrap();
++        assert_eq!(
++            hex::encode(invoice.payment_hash()),
++            "86e98f7a6f07dee3879b699a52c64023b773702abcc6f57717ca43691bd871db"
++        );
++        assert_eq!(invoice.amount_milli_satoshis(), Some(21_000));
++        let mut node_id = [0u8; 33];
++        node_id.copy_from_slice(
++            &hex::decode("0211792d0df3ac01fab0af90a98caa29d69f769e84904e3d29e3d42b470452dffc")
++                .unwrap(),
++        );
++        assert!(invoice.related_to_node(node_id));
++    }
++
+     const BOLT11_INVOICE: &str = "lnbcrt1230p1pnwzkshsp584p434kjslfl030shwps75nvy4leq5k6psvdxn4kzsxjnptlmr3spp5nxqauehzqkx3xswjtrgx9lh5pqjxkyx0kszj0nc4m4jn7uk9gc5qdq8v9ekgesxqyjw5qcqp29qxpqysgqu6ft6p8c36khp082xng2xzmta25nlg803qjncal3fhzw8eshrsdyevhlgs970a09n95r3gtvqvvyk24vyv4506cu6cxl8ytaywrjkhcp468qnl";
+     const BOLT12_INVOICE: &str = "lni1qqgth299fq4pg07a2jnjjxg6apy37q3qqc3xu3s3rg94nj40zfsy866mhu5vxne6tcej5878k2mneuvgjy8s5prpwdjxv93pqfjg8jssphjkw8td4vxcmrdxzrqd4sweg3uhy003cq0lljh62enfx5pqqc3xu3s3rg94nj40zfsy866mhu5vxne6tcej5878k2mneuvgjy84yqucj6q9sggzymg62fj8dfjzz3uvmft8xeufw62x0a5znkc38f0jk04wqrkvwsy6pxqzvjpu5yqdu4n36mdtpkxcmfsscrdvrk2y09ermuwqrllu47jkv6fs9tuwsyhaydearc5eyax2lmlc8apwhp8n5yynlpr4lm058y9a8f50qypsd4f70enu0x03ecscycu5d350e42x02fmtkzskzc6a453h5adh3gqx25k2jgjzxh6rdxhlmhtvm3f89wpxms2hm3cff7mkx63y7s3vp7f5xzya6lw9sc9v5hlr69pcxcvx3emt23pcqqqqqqqqqqqqqqq5qqqqqqqqqqqqqwjfvkl43fqqqqqqzjqgehz6n86sg9hp98lphy7x4rrxejy48yzs5srcfmzdqeuwzglfym8r7fmtvce7x4q8xykszczzqnys09pqr09vuwkm2cd3kx6vyxqmtqaj3rewg7lrsqlll9054nxj0cyqg5ltjmfnrm8nerkvj0uz4wfn9annnm9r3fyx4w08hj463nmya8vmutf8fmufgzvfgkyea03tltjyn2qynt8ufenhxkh5nrl5usa2f8q";
+ 

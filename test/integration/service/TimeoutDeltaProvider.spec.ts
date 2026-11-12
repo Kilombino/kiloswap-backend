@@ -9,6 +9,7 @@ import TimeoutDeltaProvider from '../../../lib/service/TimeoutDeltaProvider';
 import Sidecar from '../../../lib/sidecar/Sidecar';
 import NodeSwitch from '../../../lib/swap/NodeSwitch';
 import type { Currency } from '../../../lib/wallet/WalletManager';
+import { createInvoice } from '../../unit/swap/InvoiceUtils';
 import {
   bitcoinClient,
   bitcoinLndClient,
@@ -226,7 +227,8 @@ describe('TimeoutDeltaProvider', () => {
         OrderSide.SELL,
         SwapType.Submarine,
         SwapVersion.Legacy,
-        'lnbcrt1n1pjtwpszsp53ap24lskmwzre57a7dzyvv3fr4j0xpnj84zedp2mx4xkvyd00mmqpp57dxxsvrtw6dhxzv09ufvjl2nwta65csqqv5rw7akvscv9aqlqclsdqqxqyjw5qcqp29qxpqysgq7t354a4juq8869psw0fp59g57fdh63cad4gdd0hl6pp7t2ytsexzq8qex4nx0a05n8u4kvh5ttv5zdm7d3uwjf6cglxstu7gfy56fqqp6wscqc',
+        // A node nobody can route to
+        createInvoice(),
       ),
     ).resolves.toEqual([
       timeoutDelta.swapMaximal * TimeoutDeltaProvider.blockTimes.get(base)!,

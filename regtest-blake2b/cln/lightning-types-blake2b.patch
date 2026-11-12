@@ -1,0 +1,48 @@
+diff --git a/src/features.rs b/src/features.rs
+--- a/src/features.rs	2006-07-23 20:21:28.000000000 -0500
++++ b/src/features.rs	2026-11-12 15:05:01.047700535 -0600
+@@ -907,7 +907,7 @@
+ 		// Bitwise AND-ing with all even bits set except for known features will select required
+ 		// unknown features.
+ 		let mut known_chunks = T::KNOWN_FEATURE_MASK.chunks(8);
+-		for chunk in self.flags.chunks(8) {
++		for (chunk_index, chunk) in self.flags.chunks(8).enumerate() {
+ 			let mut flag_bytes = [0; 8];
+ 			flag_bytes[..chunk.len()].copy_from_slice(&chunk);
+ 			let flag_int = u64::from_le_bytes(flag_bytes);
+@@ -917,6 +917,14 @@
+ 			known_bytes[..known_chunk.len()].copy_from_slice(&known_chunk);
+ 			let known_int = u64::from_le_bytes(known_bytes);
+ 
++			// Bitcoin BLAKE2b chain: `option_blake2b` (512/513) marks what
++			// this chain's nodes produce, in every context, and is known here.
++			let known_int = if chunk_index == BLAKE2B_FEATURE_CHUNK {
++				known_int | BLAKE2B_FEATURE_BITS
++			} else {
++				known_int
++			};
++
+ 			const REQ_MASK: u64 = u64::from_le_bytes([ANY_REQUIRED_FEATURES_MASK; 8]);
+ 			if flag_int & (REQ_MASK & !known_int) != 0 {
+ 				return true;
+@@ -1069,6 +1077,20 @@
+ 	}
+ }
+ 
++/// Bitcoin BLAKE2b chain: `option_blake2b` is feature bits 512 (required)
++/// and 513 (optional), the lowest two bits of the ninth 64-bit chunk.
++pub const BLAKE2B_REQUIRED_BIT: usize = 512;
++const BLAKE2B_FEATURE_CHUNK: usize = BLAKE2B_REQUIRED_BIT / 64;
++const BLAKE2B_FEATURE_BITS: u64 = 0b11;
++
++impl<T: sealed::Context> Features<T> {
++	/// Whether `option_blake2b` (bit 512 or 513) is set: the mark a node on
++	/// the Bitcoin BLAKE2b chain puts on what it produces.
++	pub fn supports_blake2b(&self) -> bool {
++		self.flags.get(BLAKE2B_REQUIRED_BIT / 8).map_or(false, |byte| byte & 0b11 != 0)
++	}
++}
++
+ pub(crate) fn unset_features_mask_at_position<T: sealed::Context>(
+ 	other: &Features<T>, index: usize,
+ ) -> u8 {

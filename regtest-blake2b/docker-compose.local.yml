@@ -1,0 +1,6 @@
+# For a workstation whose own Postgres holds 5432: the regtest's on 15432
+# (run the tests with BOLTZ_TEST_DB_PORT=15432). Not used in CI.
+services:
+  postgres:
+    ports: !override
+      - 15432:5432

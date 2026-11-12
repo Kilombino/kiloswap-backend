@@ -5,7 +5,7 @@ import { getHexBuffer } from '../../../lib/Utils';
 import ArkClient, { ArkBlockEventKind } from '../../../lib/chain/ArkClient';
 import TransactionLabelRepository from '../../../lib/db/repositories/TransactionLabelRepository';
 import { waitForFunctionToBeTrue } from '../../Utils';
-import { arkClient, bitcoinClient } from '../Nodes';
+import { arkClient, arkEnabled, bitcoinClient } from '../Nodes';
 import { createVHtlc } from './Utils';
 
 const randomPublicKey = () =>
@@ -13,7 +13,7 @@ const randomPublicKey = () =>
 
 jest.mock('../../../lib/db/repositories/ChainTipRepository');
 
-describe('ArkClient', () => {
+(arkEnabled ? describe : describe.skip)('ArkClient', () => {
   beforeAll(async () => {
     await arkClient.connect(bitcoinClient);
   });

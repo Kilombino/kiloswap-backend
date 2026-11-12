@@ -170,7 +170,11 @@ pub mod test {
             Mutex::new(
                 connect(Config {
                     host: "127.0.0.1".to_string(),
-                    port: 5432,
+                    // Another port where a host's own Postgres holds 5432
+                    port: std::env::var("BOLTZ_TEST_DB_PORT")
+                        .ok()
+                        .and_then(|port| port.parse().ok())
+                        .unwrap_or(5432),
                     database: "boltz_test".to_string(),
                     username: "boltz".to_string(),
                     password: "boltz".to_string(),

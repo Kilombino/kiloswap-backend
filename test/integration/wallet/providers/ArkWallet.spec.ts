@@ -2,14 +2,16 @@ import Logger from '../../../../lib/Logger';
 import ArkClient from '../../../../lib/chain/ArkClient';
 import TransactionLabelRepository from '../../../../lib/db/repositories/TransactionLabelRepository';
 import ArkWallet from '../../../../lib/wallet/providers/ArkWallet';
-import { arkClient, bitcoinClient } from '../../Nodes';
+import { arkClient, arkEnabled, bitcoinClient } from '../../Nodes';
 
 jest.mock('../../../../lib/db/repositories/ChainTipRepository');
 
-describe('ArkWallet', () => {
-  const wallet = new ArkWallet(Logger.disabledLogger, arkClient);
+(arkEnabled ? describe : describe.skip)('ArkWallet', () => {
+  // Made here, not in the describe body: that runs even when skipped
+  let wallet: ArkWallet;
 
   beforeAll(async () => {
+    wallet = new ArkWallet(Logger.disabledLogger, arkClient);
     await arkClient.connect(bitcoinClient);
   });
 

@@ -1,0 +1,162 @@
+# Boltz's regtest (../regtest, BoltzExchange/regtest) on the BLAKE2b chain:
+# laid over its docker-compose.yml by start.sh. Only the Bitcoin side
+# changes: Knots with the BLAKE2b rules from block 20, Lightning Fork for
+# lnd, privkeyio's BLAKE2b Core Lightning. Liquid, the EVM chains, Postgres
+# and Redis are upstream's.
+x-lnd-command: &lnd-command
+  - --listen=0.0.0.0:9735
+  - --rpclisten=0.0.0.0:10009
+  - --restlisten=0.0.0.0:8081
+  - --bitcoin.timelockdelta=24
+  - --bitcoin.active
+  - --bitcoin.regtest
+  - --bitcoin.node=bitcoind
+  - --bitcoin.blake2b-activation-height=20
+  - --bitcoind.rpchost=bitcoind
+  - --bitcoind.zmqpubrawtx=bitcoind:29000
+  - --bitcoind.zmqpubrawblock=bitcoind:29001
+  - --bitcoind.rpccookie=/app/bitcoin/regtest/.cookie
+  - --noseedbackup
+  - --protocol.wumbo-channels
+  - --protocol.no-onion-messages
+  - --lnddir=/app/lnd
+
+services:
+  bitcoind:
+    image: ${BLAKE2B_KNOTS_IMAGE:-lfswap/regtest-knots:29.4.2}
+    entrypoint: ['bitcoind']
+    command:
+      - -regtest
+      - -datadir=/app/bitcoin
+      - -printtoconsole
+      - -testactivationheight=blake2b@20
+      - -blake2b_headline=Lightning Fork Swap backend tests
+      - -rdtsexpiry=1819843200
+      - -fallbackfee=0.00000253
+      - -mintxfee=0.000001
+      - -zmqpubrawtx=tcp://0.0.0.0:29000
+      - -zmqpubrawblock=tcp://0.0.0.0:29001
+      - -txindex
+      - -rpcallowip=0.0.0.0/0
+      - -rpcbind=0.0.0.0
+      - -deprecatedrpc=warnings
+      - -rpcauth=backend:b2df2fbc6cd2569073e5b5860011e00c$$7930df46dff1fc5690973aef153e2106ece57104d7d16b737fb775131bc99ea4
+
+  lnd-1: &lnd
+    image: ${BLAKE2B_LND_IMAGE:-paulscode/lightning-fork:0.21.3-beta-blake2b.17@sha256:1922383540d5545d67f0089149254eb0a23360e73c9d754b85f061a6485596f6}
+    command: *lnd-command
+  lnd-2: *lnd
+  lnd-3: *lnd
+
+  cln-1: &cln
+    image: ${BLAKE2B_CLN_IMAGE:-lfswap/regtest-cln:v26.06.10-blake2b.1}
+  cln-2: *cln
+
+  # What reads Bitcoin blocks itself and cannot parse a BLAKE2b header
+  # (electrs, so Esplora; NBXplorer, so the Ark stack): not started. The
+  # service offers neither; the Ark tests are skipped (BOLTZ_REGTEST_ARK=off).
+  electrs:
+    profiles: !override ['sha256-only']
+  esplora:
+    profiles: !override ['sha256-only']
+  nbxplorer:
+    profiles: !override ['sha256-only']
+  arkd-wallet:
+    profiles: !override ['sha256-only']
+  arkd:
+    profiles: !override ['sha256-only']
+  fulmine:
+    profiles: !override ['sha256-only']
+
+  # Its setup waits for arkd when the profile is backend-dev
+  regtest-start:
+    environment: !override
+      - COMPOSE_PROFILES=blake2b
+
+# The volumes' names are global: upstream's (boltz-*) would be shared with any
+# other checkout of Boltz's regtest on the machine. Ours, bound to our data/.
+volumes:
+  boltz-data:
+    name: lfswap-b2b-boltz-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/backend
+  boltz-client-data:
+    name: lfswap-b2b-boltz-client-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/boltz-client
+  bitcoin-data:
+    name: lfswap-b2b-bitcoin-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/bitcoind
+  elements-data:
+    name: lfswap-b2b-elements-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/elements
+  cln1-data:
+    name: lfswap-b2b-cln1-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/cln1
+  cln2-data:
+    name: lfswap-b2b-cln2-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/cln2
+  lnd1-data:
+    name: lfswap-b2b-lnd1-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/lnd1
+  lnd2-data:
+    name: lfswap-b2b-lnd2-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/lnd2
+  lnd3-data:
+    name: lfswap-b2b-lnd3-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/lnd3
+  nginx-data:
+    name: lfswap-b2b-nginx-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/backend-nginx/
+  arkd-data:
+    name: lfswap-b2b-arkd-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/arkd
+  fulmine-data:
+    name: lfswap-b2b-fulmine-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/fulmine

@@ -169,16 +169,22 @@ export const resetNodeConnectionPromises = () => {
   cln1.reset();
 };
 
-export const arkClient = new ArkClient(
-  Logger.disabledLogger,
-  {
-    host: '127.0.0.1',
-    port: 7000,
-    macaroonpath: `${resolve(__dirname, '..', '..')}/regtest/data/fulmine/macaroons/admin.macaroon`,
-    useLocktimeSeconds: true,
-  },
-  mockSidecar,
-);
+// Ark runs in Boltz's regtest, not on the BLAKE2b one (regtest-blake2b:
+// NBXplorer cannot read its blocks), where BOLTZ_REGTEST_ARK=off
+export const arkEnabled = process.env.BOLTZ_REGTEST_ARK !== 'off';
+
+export const arkClient = arkEnabled
+  ? new ArkClient(
+      Logger.disabledLogger,
+      {
+        host: '127.0.0.1',
+        port: 7000,
+        macaroonpath: `${resolve(__dirname, '..', '..')}/regtest/data/fulmine/macaroons/admin.macaroon`,
+        useLocktimeSeconds: true,
+      },
+      mockSidecar,
+    )
+  : (undefined as unknown as ArkClient);
 
 export const waitForClnChainSync = async () => {
   const cln = await getClnClient();

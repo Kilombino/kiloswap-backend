@@ -3868,6 +3868,106 @@ describe('SwapNursery', () => {
     });
   });
 
+  describe('refundUtxo', () => {
+    const p2wpkh = (byte: number) =>
+      Buffer.concat([Buffer.from([0x00, 0x14]), Buffer.alloc(20, byte)]);
+
+    const lockup = new Transaction({ allowUnknownOutputs: true });
+    lockup.addInput({ txid: Buffer.alloc(32, 1), index: 0 });
+    lockup.addOutput({ script: p2wpkh(2), amount: 10_000n });
+
+    const refund = new Transaction({ allowUnknownOutputs: true });
+    refund.addInput({ txid: lockup.id, index: 0 });
+    refund.addOutput({ script: p2wpkh(3), amount: 9_000n });
+
+    const swap = {
+      id: 'reverse-utxo-swap',
+      type: SwapType.ReverseSubmarine,
+      transactionId: lockup.id,
+      transactionVout: 0,
+    } as any;
+
+    let chainClient: any;
+
+    beforeEach(() => {
+      chainClient = {
+        symbol: 'BTC',
+        currencyType: CurrencyType.BitcoinLike,
+        getWalletTransaction: jest.fn().mockResolvedValue({ hex: refund.hex }),
+        sendRawTransaction: jest
+          .fn()
+          .mockRejectedValue(new Error('txn-already-in-mempool')),
+        getRawTransaction: jest.fn().mockResolvedValue(lockup.hex),
+      };
+      (
+        RefundTransactionRepository.getTransactionForSwap as jest.Mock
+      ).mockResolvedValue({
+        id: refund.id,
+        swapId: swap.id,
+        status: 'pending',
+      });
+      (
+        WrappedSwapRepository.setTransactionRefunded as jest.Mock
+      ).mockImplementation(async (swap) => swap);
+      jest.spyOn(swapNursery, 'emit');
+    });
+
+    test('should record a refund sent before instead of building another', async () => {
+      await (swapNursery as any).refundUtxo(
+        { symbol: 'BTC', chainClient } as any,
+        swap,
+      );
+
+      expect(chainClient.getWalletTransaction).toHaveBeenCalledWith(refund.id);
+      expect(chainClient.sendRawTransaction).toHaveBeenCalledWith(refund.hex);
+      expect(RefundTransactionRepository.addTransaction).not.toHaveBeenCalled();
+      expect(WrappedSwapRepository.setTransactionRefunded).toHaveBeenCalledWith(
+        swap,
+        1_000,
+        expect.any(String),
+      );
+      expect(swapNursery.emit).toHaveBeenCalledWith(
+        'refund',
+        expect.objectContaining({ swap, confirmed: false }),
+      );
+    });
+
+    test('should build a new refund when the wallet does not know the recorded one', async () => {
+      chainClient.getWalletTransaction.mockRejectedValue(
+        new Error('Invalid or non-wallet transaction id'),
+      );
+      // Building one needs the lockup's script and keys: stopping there
+      // shows the old one was not reused
+      chainClient.getRawTransaction.mockRejectedValue(new Error('built'));
+
+      await expect(
+        (swapNursery as any).refundUtxo(
+          { symbol: 'BTC', chainClient } as any,
+          swap,
+        ),
+      ).rejects.toThrow('built');
+      expect(chainClient.sendRawTransaction).not.toHaveBeenCalled();
+      expect(
+        WrappedSwapRepository.setTransactionRefunded,
+      ).not.toHaveBeenCalled();
+    });
+
+    test('should not reuse a refund that failed', async () => {
+      (
+        RefundTransactionRepository.getTransactionForSwap as jest.Mock
+      ).mockResolvedValue({ id: refund.id, status: 'failed' });
+      chainClient.getRawTransaction.mockRejectedValue(new Error('built'));
+
+      await expect(
+        (swapNursery as any).refundUtxo(
+          { symbol: 'BTC', chainClient } as any,
+          swap,
+        ),
+      ).rejects.toThrow('built');
+      expect(chainClient.getWalletTransaction).not.toHaveBeenCalled();
+    });
+  });
+
   describe('refundVtxo', () => {
     const refundTxId = 'ark-refund-tx';
 

@@ -54,6 +54,7 @@ import type {
   ERC20SwapValues,
   EtherSwapValues,
 } from '../consts/Types';
+import { RefundStatus } from '../db/models/RefundTransaction';
 import type ReverseSwap from '../db/models/ReverseSwap';
 import type SendApprovalHold from '../db/models/SendApprovalHold';
 import type Swap from '../db/models/Swap';
@@ -2902,6 +2903,54 @@ class SwapNursery extends TypedEventEmitter<SwapNurseryEvents> {
       swap.type === SwapType.ReverseSubmarine
         ? (swap as ReverseSwap)
         : (swap as ChainSwapInfo).sendingData;
+
+    // A refund recorded but not marked done (its broadcast's answer, or the
+    // write after it, failed): if the wallet knows it, it went out. It is
+    // sent again and recorded, not replaced by a new one that would
+    // conflict with it (and leave the first to be taken for a claim).
+    const previous = await RefundTransactionRepository.getTransactionForSwap(
+      swap.id,
+    );
+    if (
+      previous !== null &&
+      previous !== undefined &&
+      previous.status === RefundStatus.Pending
+    ) {
+      let known: string | undefined;
+      try {
+        known = (await chainClient.getWalletTransaction(previous.id)).hex;
+      } catch {
+        // Not in the wallet: it was never sent; a new one is built below
+      }
+      if (known !== undefined) {
+        const refundTransaction = parseTransaction(
+          chainClient.currencyType,
+          known,
+        );
+        try {
+          await chainClient.sendRawTransaction(known);
+        } catch (error) {
+          // In the mempool or a block already
+          this.logger.debug(
+            `Refund ${previous.id} of Swap ${swap.id} sent again: ${formatError(error)}`,
+          );
+        }
+        this.logger.warn(
+          `Refund ${previous.id} of ${swapTypeToPrettyString(swap.type)} Swap ${swap.id} was sent before; recording it`,
+        );
+        this.emit('refund', {
+          confirmed: false,
+          emitFailure: true,
+          refundTransaction,
+          swap: await WrappedSwapRepository.setTransactionRefunded(
+            swap,
+            await calculateTransactionFee(chainClient, refundTransaction),
+            Errors.REFUNDED_COINS(sendingData.transactionId!).message,
+          ),
+        });
+        return;
+      }
+    }
 
     const rawLockupTransaction =
       await chainCurrency.chainClient!.getRawTransaction(

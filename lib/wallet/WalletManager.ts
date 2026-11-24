@@ -30,6 +30,7 @@ import type InjectedProvider from './ethereum/InjectedProvider';
 import ArkWallet from './providers/ArkWallet';
 import CoreWalletProvider from './providers/CoreWalletProvider';
 import ElementsWalletProvider from './providers/ElementsWalletProvider';
+import LndWalletProvider from './providers/LndWalletProvider';
 import type WalletProviderInterface from './providers/WalletProviderInterface';
 
 type CurrencyLimits = {
@@ -139,14 +140,21 @@ class WalletManager {
 
       let walletProvider: WalletProviderInterface | undefined = undefined;
 
-      if (
+      const lndWallet =
         configCurrencies.find((config) => config.symbol === currency.symbol)
-          ?.preferredWallet === 'lnd'
-      ) {
-        throw new Error('LND wallet support was removed');
+          ?.preferredWallet === 'lnd';
+      if (lndWallet && currency.type !== CurrencyType.BitcoinLike) {
+        throw new Error('the LND wallet is for Bitcoin-like chains only');
       }
 
-      if (currency.type === CurrencyType.BitcoinLike) {
+      if (lndWallet) {
+        // Kiloswap: the main lnd's on-chain wallet (LndWalletProvider)
+        walletProvider = new LndWalletProvider(
+          this.logger,
+          currency.lndClients,
+          currency.chainClient!,
+        );
+      } else if (currency.type === CurrencyType.BitcoinLike) {
         walletProvider = new CoreWalletProvider(
           this.logger,
           currency.chainClient!,
@@ -162,9 +170,10 @@ class WalletManager {
         );
       }
 
-      // Sanity check that wallet support is compiled in
+      // Sanity check that wallet support is compiled in (the LND wallet's
+      // client connects later, in Boltz.start)
       try {
-        await walletProvider.getBalance();
+        if (!lndWallet) await walletProvider.getBalance();
       } catch (error) {
         // No wallet support is compiled in
         if ((error as any).message === 'Method not found') {

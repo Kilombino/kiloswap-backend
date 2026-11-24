@@ -92,8 +92,12 @@ pub async fn connect_nodes<K: KeysHelper>(
                     ..
                 } = currency;
 
+                // Kiloswap: "lnd" keeps the swaps' coins in lnd's wallet (the
+                // TypeScript side's LndWalletProvider); the sidecar still uses
+                // the node's wallet for its own rare paths.
                 if let Some(preferred_wallet) = preferred_wallet
                     && preferred_wallet != PREFERRED_WALLET_CORE
+                    && preferred_wallet != "lnd"
                 {
                     return Err(anyhow!(
                         "preferred wallet not supported: {} (supported: {})",

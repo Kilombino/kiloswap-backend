@@ -8,7 +8,9 @@ export type Config = {
 };
 
 class RoutingFee {
-  private static readonly minFeeMillisatoshi = Math.ceil(121 * 1000);
+  // Kiloswap: 10 sat, the guard's floor (option A): a larger limit is
+  // lowered by the guard anyway
+  private static readonly minFeeMillisatoshi = Math.ceil(10 * 1000);
   private static readonly maxFeeRatio = 0.1;
 
   public readonly defaultPaymentFeeRatio: number;

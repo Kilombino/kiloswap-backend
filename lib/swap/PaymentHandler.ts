@@ -121,10 +121,15 @@ type PreferredNode =
 class PaymentHandler {
   private static readonly resetMissionControlInterval = 10 * 60 * 1000;
   private static readonly errCltvTooSmall = 'CLTV limit too small';
+  // Kiloswap: no route within the guard's routing fee limit
+  private static readonly maxNoRouteFailures = 3;
+  public static readonly errNoRouteWithinFee =
+    'no route to the invoice within the routing fee limit; refund the lockup after the timeout';
 
   public readonly selfPaymentClient: SelfPaymentClient;
 
   private lastResetMissionControl: number | undefined = undefined;
+  private readonly noRouteFailures = new Map<string, number>();
 
   constructor(
     private readonly logger: Logger,
@@ -410,6 +415,35 @@ class PaymentHandler {
     }
 
     const nodeLabel = `${LndClient.serviceName}-${lndClient.id}`;
+    if (
+      process.env.KILOSWAP_GUARD_URL &&
+      errorMessage ===
+        LndClient.formatPaymentFailureReason(
+          PaymentFailureReason.FAILURE_REASON_NO_ROUTE,
+        )
+    ) {
+      // Kiloswap: the guard caps the routing fee at what the lockup pays
+      // over the invoice (at least 10 sat). No route within it a few times
+      // running: the swap is given up cleanly and the user refunds after
+      // the timeout (the guard released the payment on lnd's FAILED)
+      const failures = (this.noRouteFailures.get(swap.id) ?? 0) + 1;
+      this.noRouteFailures.set(swap.id, failures);
+      if (failures >= PaymentHandler.maxNoRouteFailures) {
+        this.noRouteFailures.delete(swap.id);
+        this.logger.warn(
+          `Abandoning Swap ${swap.id}: no route within the routing fee limit`,
+        );
+        this.swapNursery.emit(
+          'invoice.failedToPay',
+          await SwapRepository.setSwapStatus(
+            swap,
+            SwapUpdateEvent.InvoiceFailedToPay,
+            PaymentHandler.errNoRouteWithinFee,
+          ),
+        );
+      }
+      return undefined;
+    }
     if (process.env.KILOSWAP_GUARD_URL) {
       // Kiloswap: the operator's lnd serves others too; the guard refuses it
       return undefined;

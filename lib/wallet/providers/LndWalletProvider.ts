@@ -115,7 +115,7 @@ class LndWalletProvider implements WalletProviderInterface {
     if (fromHeight > start) {
       start = fromHeight;
     }
-    const all = [];
+    const all: lndrpc.Transaction[] = [];
     let offset = 0;
     for (let page = 0; page < 20; page++) {
       const res = await this.lndClient.getOnchainTransactions(start, offset, 500);

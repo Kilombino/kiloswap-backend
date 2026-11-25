@@ -22,6 +22,8 @@ use tracing::{debug, error, info, trace, warn};
 
 const MAX_WORKERS: usize = 16;
 const BATCH_REQUEST_SIZE: usize = 64;
+// Kiloswap: whole blocks per getblock batch (the txindex shim allows 10)
+const GETBLOCK_BATCH_SIZE: usize = 8;
 const CHANNEL_BUFFER_SIZE: usize = 1_024;
 
 const BTC_KVB_SAT_VBYTE_FACTOR: u64 = 100_000;
@@ -437,12 +439,15 @@ impl Client for ChainClient {
         let self_cp = self.clone();
         let (tx_block, mut rx_block) = tokio::sync::mpsc::channel(CHANNEL_BUFFER_SIZE);
         tokio::spawn(async move {
-            loop {
-                let blockhashes = match rx_blockhash.recv().await {
+            'outer: loop {
+                let all_blockhashes: Vec<(u64, String)> = match rx_blockhash.recv().await {
                     Some(blockhashes) => blockhashes,
                     None => break,
                 };
 
+                // Kiloswap: whole blocks a few at a time (the node builds a
+                // batch's answer in memory, and the txindex shim caps it)
+                for blockhashes in all_blockhashes.chunks(GETBLOCK_BATCH_SIZE) {
                 let blocks = match self_cp
                     .client
                     .request_batch::<String>(
@@ -457,22 +462,23 @@ impl Client for ChainClient {
                     Ok(blocks) => blocks,
                     Err(err) => {
                         error!("Failed to get blocks: {}", err);
-                        break;
+                        break 'outer;
                     }
                 };
 
-                for ((height, _), block) in blockhashes.into_iter().zip(blocks) {
+                for ((height, _), block) in blockhashes.iter().cloned().zip(blocks) {
                     match block {
                         Ok(block) => {
                             if let Err(err) = tx_block.send((height, block)).await {
                                 error!("Failed to send block to channel: {}", err);
-                                break;
+                                break 'outer;
                             }
                         }
                         Err(err) => {
                             error!("Failed to get block: {}", err);
                         }
                     }
+                }
                 }
             }
         });

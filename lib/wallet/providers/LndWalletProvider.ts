@@ -108,7 +108,8 @@ class LndWalletProvider implements WalletProviderInterface {
   };
 
   // Kiloswap: lnd's wallet transactions of the last day (or from
-  // fromHeight), a page of 50 at a time (the guard allows no more), at most 20 pages
+  // fromHeight), a page of 7 at a time (the guard allows no more: lnd sends each
+  // transaction's raw hex), at most 40 pages
   private recentTransactions = async (fromHeight = 0) => {
     const { blocks } = await this.chainClient.getBlockchainInfo();
     let start = Math.max(blocks - LndWalletProvider.recentBlocks, 0);
@@ -117,10 +118,10 @@ class LndWalletProvider implements WalletProviderInterface {
     }
     const all: lndrpc.Transaction[] = [];
     let offset = 0;
-    for (let page = 0; page < 20; page++) {
-      const res = await this.lndClient.getOnchainTransactions(start, offset, 50);
+    for (let page = 0; page < 40; page++) {
+      const res = await this.lndClient.getOnchainTransactions(start, offset, 7);
       all.push(...res.transactions);
-      if (res.transactions.length < 50) {
+      if (res.transactions.length < 7) {
         break;
       }
       offset = fromProtoInt(res.lastIndex);

@@ -22,8 +22,11 @@ use tracing::{debug, error, info, trace, warn};
 
 const MAX_WORKERS: usize = 16;
 const BATCH_REQUEST_SIZE: usize = 64;
-// Kiloswap: whole blocks per getblock batch (the txindex shim allows 10)
-const GETBLOCK_BATCH_SIZE: usize = 8;
+// Kiloswap: raw items (whole blocks, raw transactions) per batch: the
+// txindex shim allows 10 raw items and at most 4 blocks, and caps an answer
+// at 32 MB (three 4 MB blocks in hex fit)
+const GETBLOCK_BATCH_SIZE: usize = 3;
+const RAW_TX_BATCH_SIZE: usize = 8;
 const CHANNEL_BUFFER_SIZE: usize = 1_024;
 
 const BTC_KVB_SAT_VBYTE_FACTOR: u64 = 100_000;
@@ -561,7 +564,7 @@ impl Client for ChainClient {
             let chunk = chunk.to_vec();
 
             tokio::spawn(async move {
-                let tx_chunks = chunk.chunks(BATCH_REQUEST_SIZE);
+                let tx_chunks = chunk.chunks(RAW_TX_BATCH_SIZE);
                 for tx_ids in tx_chunks {
                     let txs_hex = match self_cp
                         .client

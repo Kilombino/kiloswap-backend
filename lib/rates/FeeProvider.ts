@@ -77,6 +77,12 @@ type MinerFees = {
 };
 
 class FeeProvider {
+  // Kiloswap: what the guard requires a reverse swap's hold invoice to pay
+  // over the lockup (kiloswap guard: LockupVbytes, RefundVbytes, RefundDustSat)
+  public static readonly kiloswapLockupVbytes = 155;
+  public static readonly kiloswapRefundVbytes = 111;
+  public static readonly kiloswapRefundDustSat = 330;
+
   public static transactionSizes: {
     [CurrencyType.BitcoinLike]: TransactionSizes;
     [CurrencyType.Liquid]: TransactionSizes;
@@ -386,10 +392,24 @@ class FeeProvider {
           sizes = FeeProvider.transactionSizes[CurrencyType.BitcoinLike];
         }
 
+        const taproot = calculateMinerFeesForVersion(
+          sizes[SwapVersion.Taproot],
+        );
+        if (chainCurrency === 'BTC') {
+          // Kiloswap: the guard allows a reverse lockup only when the hold
+          // invoice pays for the lockup (155 vB), a refund if the user never
+          // claims (111 vB) and 330 sat, at the lockup's fee rate
+          // the lockup is sent at the whole sat/vB above the estimate
+          // (LndWalletProvider rounds up): charged at that same rate
+          taproot.reverse.lockup =
+            Math.max(1, Math.ceil(relativeFee)) *
+              (FeeProvider.kiloswapLockupVbytes +
+                FeeProvider.kiloswapRefundVbytes) +
+            FeeProvider.kiloswapRefundDustSat;
+        }
+
         this.minerFees.set(chainCurrency, {
-          [SwapVersion.Taproot]: calculateMinerFeesForVersion(
-            sizes[SwapVersion.Taproot],
-          ),
+          [SwapVersion.Taproot]: taproot,
           [SwapVersion.Legacy]: calculateMinerFeesForVersion(
             sizes[SwapVersion.Legacy],
           ),

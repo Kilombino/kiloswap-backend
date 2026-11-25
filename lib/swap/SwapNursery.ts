@@ -2975,6 +2975,17 @@ class SwapNursery extends TypedEventEmitter<SwapNurseryEvents> {
       // Kiloswap: the guard refunds through the refund leaf, to an address
       // of lnd's wallet, and keeps the hold invoice until it confirms
       const refunded = await GuardClient.refund(swap.id);
+      if (
+        (await RefundTransactionRepository.getTransactionForSwap(swap.id))
+          ?.id !== refunded.transactionId
+      ) {
+        await RefundTransactionRepository.addTransaction({
+          swapId: swap.id,
+          symbol: chainCurrency.symbol,
+          id: refunded.transactionId,
+          vin: 0,
+        });
+      }
       const refundTransaction = parseTransaction(
         chainClient.currencyType,
         await chainClient.getRawTransaction(refunded.transactionId),

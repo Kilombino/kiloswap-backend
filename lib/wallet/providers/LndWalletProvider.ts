@@ -95,9 +95,8 @@ class LndWalletProvider implements WalletProviderInterface {
     address: string,
     since: Date,
   ): Promise<SentTransaction | undefined> => {
-    const { transactions } = await this.lndClient.getOnchainTransactions(0);
     const sinceSeconds = Math.floor(since.getTime() / 1000);
-    const send = transactions.find(
+    const send = (await this.recentTransactions()).find(
       (tx) =>
         fromProtoInt(tx.amount) < 0 &&
         fromProtoInt(tx.timeStamp) >= sinceSeconds - 600 &&
@@ -107,6 +106,29 @@ class LndWalletProvider implements WalletProviderInterface {
       ? undefined
       : this.handleLndTransaction(send.txHash, address, 0);
   };
+
+  // Kiloswap: lnd's wallet transactions of the last day (or from
+  // fromHeight), a page of 500 at a time, at most 20 pages
+  private recentTransactions = async (fromHeight = 0) => {
+    const { blocks } = await this.chainClient.getBlockchainInfo();
+    let start = Math.max(blocks - LndWalletProvider.recentBlocks, 0);
+    if (fromHeight > start) {
+      start = fromHeight;
+    }
+    const all = [];
+    let offset = 0;
+    for (let page = 0; page < 20; page++) {
+      const res = await this.lndClient.getOnchainTransactions(start, offset, 500);
+      all.push(...res.transactions);
+      if (res.transactions.length < 500) {
+        break;
+      }
+      offset = fromProtoInt(res.lastIndex);
+    }
+    return all;
+  };
+
+  private static readonly recentBlocks = 144;
 
   private handleLndTransaction = async (
     transactionId: string,
@@ -124,9 +146,9 @@ class LndWalletProvider implements WalletProviderInterface {
     }
 
     let fee = 0;
-    const { transactions } =
-      await this.lndClient.getOnchainTransactions(listStartHeight);
-    const tx = transactions.find((t) => t.txHash === transactionId);
+    const tx = (await this.recentTransactions(listStartHeight)).find(
+      (t) => t.txHash === transactionId,
+    );
     if (tx !== undefined) {
       fee = fromProtoInt(tx.totalFees);
     }

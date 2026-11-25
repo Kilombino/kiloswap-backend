@@ -707,10 +707,17 @@ class LndClient extends BaseClient<EventTypes> implements LightningClient {
    */
   public getOnchainTransactions = (
     startHeight: number,
+    indexOffset = 0,
+    maxTransactions = 500,
   ): Promise<lndrpc.TransactionDetails> => {
+    // Kiloswap: always a bounded page (the guard refuses unbounded or old
+    // listings; the main lnd's history must never come back whole)
     const request: lndrpc.GetTransactionsRequest = {
       ...lndrpc.GetTransactionsRequest.create(),
       startHeight,
+      endHeight: -1,
+      indexOffset,
+      maxTransactions,
     };
 
     return this.unaryLightningCall<

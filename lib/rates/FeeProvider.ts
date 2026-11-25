@@ -80,7 +80,10 @@ class FeeProvider {
   // Kiloswap: what the guard requires a reverse swap's hold invoice to pay
   // over the lockup (kiloswap guard: LockupVbytes, RefundVbytes, RefundDustSat)
   public static readonly kiloswapLockupVbytes = 155;
-  public static readonly kiloswapRefundVbytes = 111;
+  // the guard's refund is a script-path spend of the timeout leaf: 138 vB
+  // measured on regtest refunds (the 111 vB of a key-path spend never happen
+  // without cooperative signing)
+  public static readonly kiloswapRefundVbytes = 138;
   public static readonly kiloswapRefundDustSat = 330;
 
   public static transactionSizes: {
@@ -92,7 +95,11 @@ class FeeProvider {
         normalClaim: 151,
 
         reverseLockup: 154,
-        reverseClaim: 111,
+        // Kiloswap: no cooperative signing, so the user's claim is a
+        // script-path spend (preimage + claim leaf + control block): 152 vB
+        // measured on regtest claims to P2TR (P2WSH the same, smaller types
+        // less), not the 111 vB of a key-path spend
+        reverseClaim: 152,
       },
       [SwapVersion.Legacy]: {
         // The claim transaction which spends a nested SegWit swap output and sends it to a P2WPKH address has about 170 vbytes

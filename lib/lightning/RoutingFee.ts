@@ -8,9 +8,9 @@ export type Config = {
 };
 
 class RoutingFee {
-  // Kiloswap: 10 sat, the guard's floor (option A): a larger limit is
-  // lowered by the guard anyway
-  private static readonly minFeeMillisatoshi = Math.ceil(10 * 1000);
+  // Kiloswap: 121 sat like upstream (Kilombino, 25 Nov 2026: routing like
+  // Paul's); the guard lowers any limit over max(121 sat, 0.01% of the invoice)
+  private static readonly minFeeMillisatoshi = Math.ceil(121 * 1000);
   private static readonly maxFeeRatio = 0.1;
 
   public readonly defaultPaymentFeeRatio: number;

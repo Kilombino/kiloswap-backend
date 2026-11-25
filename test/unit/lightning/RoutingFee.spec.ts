@@ -83,7 +83,7 @@ describe('RoutingFee', () => {
   });
 
   describe('calculateFee', () => {
-    const minFeeMillisatoshi = Math.ceil(10 * 1000);
+    const minFeeMillisatoshi = Math.ceil(121 * 1000);
 
     const createInvoice = (
       amountMsat: number,

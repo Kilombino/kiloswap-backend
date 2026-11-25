@@ -422,8 +422,8 @@ class PaymentHandler {
           PaymentFailureReason.FAILURE_REASON_NO_ROUTE,
         )
     ) {
-      // Kiloswap: the guard caps the routing fee at what the lockup pays
-      // over the invoice (at least 10 sat). No route within it a few times
+      // Kiloswap: the guard caps the routing fee at max(121 sat, 0.01% of
+      // the invoice), like upstream. No route within it a few times
       // running: the swap is given up cleanly and the user refunds after
       // the timeout (the guard released the payment on lnd's FAILED)
       const failures = (this.noRouteFailures.get(swap.id) ?? 0) + 1;

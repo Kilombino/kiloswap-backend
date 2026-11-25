@@ -397,10 +397,26 @@ export const calculateTransactionFee = async (
 };
 
 export const createMusig = (
-  ourKeys: { privateKey: Uint8Array; publicKey: Uint8Array },
+  ourKeys: { privateKey?: Uint8Array; publicKey: Uint8Array },
   theirPublicKey: Uint8Array,
-): Musig.MusigKeyAgg =>
-  Musig.create(ourKeys.privateKey, [ourKeys.publicKey, theirPublicKey]);
+): Musig.MusigKeyAgg => {
+  if (ourKeys.privateKey === undefined) {
+    // Kiloswap: only our public key (the guard holds the private one). The
+    // aggregate and its tweak are enough to make and find swap outputs;
+    // anything that tries to sign with it fails.
+    const publicKeys = [ourKeys.publicKey, theirPublicKey];
+    const aggPubkey = Musig.aggregateKeys(publicKeys);
+    return new Musig.MusigKeyAgg({
+      privateKey: undefined as unknown as Uint8Array,
+      myPublicKey: ourKeys.publicKey,
+      publicKeys,
+      myIndex: 0 as Musig.ParticipantIndex,
+      aggPubkey,
+      internalKey: aggPubkey,
+    });
+  }
+  return Musig.create(ourKeys.privateKey, [ourKeys.publicKey, theirPublicKey]);
+};
 
 export const tweakMusig = <T extends Musig.MusigKeyAgg>(
   type: CurrencyType,

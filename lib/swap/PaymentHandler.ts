@@ -410,6 +410,10 @@ class PaymentHandler {
     }
 
     const nodeLabel = `${LndClient.serviceName}-${lndClient.id}`;
+    if (process.env.KILOSWAP_GUARD_URL) {
+      // Kiloswap: the operator's lnd serves others too; the guard refuses it
+      return undefined;
+    }
     if (
       this.lastResetMissionControl === undefined ||
       Date.now() - this.lastResetMissionControl >=

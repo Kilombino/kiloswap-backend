@@ -218,7 +218,18 @@ class WalletManager {
               currency.network! as LiquidNetwork,
             );
 
-      wallet.initKeyProvider(keyProviderInfo.derivationPath, this.masterNode);
+      const swapXpub = WalletManager.swapXpub();
+      if (swapXpub !== undefined && currency.type === CurrencyType.BitcoinLike) {
+        // Kiloswap: the swaps' server key lives in the guard; the backend
+        // gets the extended public key at the key provider's path, so it
+        // can put our public keys in swaps but cannot sign their spends
+        this.logger.info(
+          `${currency.symbol} swap keys: extended public key at ${keyProviderInfo.derivationPath} (signing is the guard's)`,
+        );
+        wallet.initKeyProvider('m', HDKey.fromExtendedKey(swapXpub));
+      } else {
+        wallet.initKeyProvider(keyProviderInfo.derivationPath, this.masterNode);
+      }
 
       this.wallets.set(currency.symbol, wallet);
     }
@@ -244,6 +255,17 @@ class WalletManager {
         );
       }
     }
+  };
+
+  // Kiloswap: KILOSWAP_SWAP_XPUB, or the file KILOSWAP_SWAP_XPUB_FILE
+  public static swapXpub = (): string | undefined => {
+    if (process.env.KILOSWAP_SWAP_XPUB) {
+      return process.env.KILOSWAP_SWAP_XPUB.trim();
+    }
+    if (process.env.KILOSWAP_SWAP_XPUB_FILE) {
+      return fs.readFileSync(process.env.KILOSWAP_SWAP_XPUB_FILE, 'utf-8').trim();
+    }
+    return undefined;
   };
 
   private static deriveFromMnemonic = (mnemonic: string) => {

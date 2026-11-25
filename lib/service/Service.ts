@@ -842,7 +842,8 @@ class Service {
     const keys = wallet.getKeysByIndex(index);
     return {
       publicKey: getHexString(keys.publicKey),
-      privateKey: getHexString(keys.privateKey!),
+      // Kiloswap: empty when the guard holds the private key
+      privateKey: keys.privateKey ? getHexString(keys.privateKey) : '',
     };
   };
 

@@ -65,6 +65,9 @@ abstract class CoopSignerBase<
     toClaim: SwapToClaim<T>,
   ): Promise<CooperativeClientDetails> => {
     const wallet = this.walletManager.wallets.get(chainCurrency.symbol)!;
+    if (!wallet.canSign()) {
+      throw new Error('cooperative signing is disabled');
+    }
     const address =
       toClaim.cooperative?.sweepAddress ||
       (await wallet.getAddress(

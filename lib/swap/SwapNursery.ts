@@ -1,3 +1,4 @@
+import GuardClient from '../wallet/GuardClient';
 import type { Transaction } from '@scure/btc-signer';
 import type { Types } from 'boltz-core';
 import { OutputType, SwapTreeSerializer } from 'boltz-core';
@@ -2415,6 +2416,24 @@ class SwapNursery extends TypedEventEmitter<SwapNurseryEvents> {
       return;
     }
 
+    if (!wallet.canSign()) {
+      // Kiloswap: the guard holds the server key and claims through the
+      // claim leaf, to an address of lnd's wallet
+      try {
+        const claimed = await GuardClient.claim(swap.id);
+        this.logger.info(
+          `Guard claimed ${wallet.symbol} of ${swapTypeToPrettyString(swap.type)} Swap ${swap.id} in: ${claimed.transactionId}`,
+        );
+        this.emit('claim', {
+          swap: await SwapRepository.setMinerFee(swap as Swap, claimed.fee),
+        });
+      } catch (error) {
+        this.emitClaimFailure(swap, wallet.symbol, error);
+        throw error;
+      }
+      return;
+    }
+
     try {
       const claimTransaction = constructClaimTransaction(
         wallet,
@@ -2950,6 +2969,30 @@ class SwapNursery extends TypedEventEmitter<SwapNurseryEvents> {
         });
         return;
       }
+    }
+
+    if (!wallet.canSign() && swap.type === SwapType.ReverseSubmarine) {
+      // Kiloswap: the guard refunds through the refund leaf, to an address
+      // of lnd's wallet, and keeps the hold invoice until it confirms
+      const refunded = await GuardClient.refund(swap.id);
+      const refundTransaction = parseTransaction(
+        chainClient.currencyType,
+        await chainClient.getRawTransaction(refunded.transactionId),
+      );
+      this.logger.info(
+        `Guard refunded ${chainClient.symbol} of ${swapTypeToPrettyString(swap.type)} Swap ${swap.id} in: ${refunded.transactionId}`,
+      );
+      this.emit('refund', {
+        confirmed: false,
+        emitFailure: true,
+        refundTransaction,
+        swap: await WrappedSwapRepository.setTransactionRefunded(
+          swap,
+          refunded.fee,
+          Errors.REFUNDED_COINS(sendingData.transactionId!).message,
+        ),
+      });
+      return;
     }
 
     const rawLockupTransaction =

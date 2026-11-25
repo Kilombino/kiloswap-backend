@@ -92,6 +92,11 @@ pub async fn connect_nodes<K: KeysHelper>(
                     ..
                 } = currency;
 
+                // Kiloswap: with "lnd" the guard holds the swaps' server key
+                // and makes every refund itself; this side's wallet (another
+                // seed) must not try to replace them
+                let guard_spends = preferred_wallet.as_deref() == Some("lnd");
+
                 // Kiloswap: "lnd" keeps the swaps' coins in lnd's wallet (the
                 // TypeScript side's LndWalletProvider); the sidecar still uses
                 // the node's wallet for its own rare paths.
@@ -134,7 +139,8 @@ pub async fn connect_nodes<K: KeysHelper>(
                 }
                 .map(|wallet| Arc::new(wallet) as Arc<dyn Wallet + Send + Sync>);
 
-                if let Some(chain) = chain.as_ref()
+                if !guard_spends
+                    && let Some(chain) = chain.as_ref()
                     && let Some(wallet) = wallet.as_ref()
                 {
                     create_bumper(

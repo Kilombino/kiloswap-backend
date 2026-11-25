@@ -18,7 +18,9 @@ import type WalletProviderInterface from './providers/WalletProviderInterface';
 
 export type WalletKeys = {
   publicKey: Buffer;
-  privateKey: Buffer;
+  // Kiloswap: undefined when the wallet holds only the extended public key
+  // (the guard holds the private one and does every server-side spend)
+  privateKey?: Buffer;
 };
 
 class Wallet implements BalancerFetcher {
@@ -68,9 +70,16 @@ class Wallet implements BalancerFetcher {
     const node = this.masterNode.derive(`${this.derivationPath}/${index}`);
     return {
       publicKey: Buffer.from(node.publicKey!),
-      privateKey: Buffer.from(node.privateKey!),
+      privateKey: node.privateKey ? Buffer.from(node.privateKey) : undefined,
     };
   };
+
+  /**
+   * Kiloswap: whether this wallet can sign swap spends. With only the
+   * extended public key, claims and refunds go to the guard.
+   */
+  public canSign = (): boolean =>
+    this.masterNode !== undefined && this.masterNode.privateKey !== null;
 
   /**
    * Gets a new pair of keys

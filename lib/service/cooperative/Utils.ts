@@ -55,6 +55,11 @@ export const createPartialSignature = async (
     }
   }
 
+  if (!wallet.canSign()) {
+    // Kiloswap: no cooperative signing; refunds and claims take the
+    // script path (the guard holds the server key)
+    throw new Error('cooperative signing is disabled');
+  }
   const ourKeys = wallet.getKeysByIndex(keyIndex);
   const hash = await hashForWitnessV1(currency, tx, vin);
 
